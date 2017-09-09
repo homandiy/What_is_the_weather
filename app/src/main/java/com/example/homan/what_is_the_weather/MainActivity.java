@@ -110,6 +110,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         view.setFocusable(false);
         InputMethodManager imm = (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
         imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
+
         String city = null;
         try {
             city = URLEncoder.encode(cityName.getText().toString(), "UTF-8");
@@ -168,21 +169,25 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             URL url;
             HttpURLConnection urlConnection = null;
 
+            Log.i("tms URL", urls[0]);
+
             try {
                 String result = "";
 
                 url = new URL(urls[0]);
                 urlConnection = (HttpURLConnection) url.openConnection();
 
+                int code = urlConnection.getResponseCode();
+                Log.i ("tms code", String.valueOf(code));
+
+                if (code == 404) {
+                    Log.i("tms code sent", "true");
+                    return "404";
+                }
+
                 InputStream inpt  = urlConnection.getInputStream();
 
-                BufferedReader reader = new BufferedReader(new InputStreamReader(inpt));
-                StringBuilder builder = new StringBuilder();
-
-                while ((result = reader.readLine()) != null) {
-                    builder.append(result);
-                }
-                return builder.toString();
+                return readStream(inpt);
 
             } catch (Exception e) {
                 Toast.makeText(getApplicationContext(), "City Not Found", Toast.LENGTH_LONG).show();
@@ -194,77 +199,108 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         protected void onPostExecute(String s) {
             super.onPostExecute(s);
 
-            Log.i("tms Weather", s);
+            Log.i("tms PostExecute", s);
 
-            //convert string to jason
-            try {
-                String message = "";
-                String inputName = cityName.getText().toString();
+            //check HTTP 404
+            if (!s.equals("404")) {
 
-                JSONObject jsonObject = new JSONObject(s);
-                String weatherInfo = jsonObject.getString("weather");
-                String cityNameFromSite = jsonObject.getString("name");
-                String errMessage = jsonObject.getString("message");
+                //convert string to jason
+                try {
+                    String message = "";
+                    String inputName = cityName.getText().toString();
 
-                //check input name and err message
-                if ( cityNameFromSite.equalsIgnoreCase(inputName) || errMessage.equalsIgnoreCase("city not found")) {
-                    Log.i("tms name <>", cityNameFromSite+" vs "+ inputName+ " True");
+                    JSONObject jsonObject = new JSONObject(s);
+                    String weatherInfo = jsonObject.getString("weather");
+                    String cityNameFromSite = jsonObject.getString("name");
 
-                    JSONArray array = new JSONArray(weatherInfo);
+                    Log.i("tms name <>", cityNameFromSite + " vs " + inputName + " True");
 
-                    for (int i = 0; i < array.length(); i++) {
-                        JSONObject  jsonPart = array.getJSONObject(i);
+                    //check input name and err message
+                    if ( cityNameFromSite.equalsIgnoreCase(inputName) ) {
 
-                        String main = "";
-                        String description = "";
-                        String icon = "";
-                        String iconUrl = "";
 
-                        main = jsonPart.getString("main");
-                        description = jsonPart.getString("description");
-                        icon  = jsonPart.getString("icon");
+                        JSONArray array = new JSONArray(weatherInfo);
 
-                        if (main != "" && description != "") {
-                            message = "City: " + cityNameFromSite + "." +
-                                    "\nCondition: " + main + "." +
-                                    "\nDescription: " + description + ".";
-                            iconUrl = iconLink + icon + ".png";
+                        for (int i = 0; i < array.length(); i++) {
+                            JSONObject jsonPart = array.getJSONObject(i);
 
-                            weatherData.setText(message);
-                            weatherIcon.setImageBitmap(getIcon(iconUrl));
+                            String main = "";
+                            String description = "";
+                            String icon = "";
+                            String iconUrl = "";
 
-                            //text to speech
-                            speakOutNow(message);
+                            main = jsonPart.getString("main");
+                            description = jsonPart.getString("description");
+                            icon = jsonPart.getString("icon");
 
-                        } else {
-                            Toast.makeText(getApplicationContext(), "Could not find weather", Toast.LENGTH_LONG).show();
-                        }
-                    }//endfor
-                } else {
-                    Log.i("tms name <>", cityNameFromSite+" vs "+ inputName+ " False");
+                            if (main != "" && description != "") {
+                                message = "City: " + cityNameFromSite + "." +
+                                        "\nCondition: " + main + "." +
+                                        "\nDescription: " + description + ".";
+                                iconUrl = iconLink + icon + ".png";
 
-                    playSoundEffect("wrong");
+                                weatherData.setText(message);
+                                weatherIcon.setImageBitmap(getIcon(iconUrl));
 
-                    weatherIcon.setImageResource(R.drawable.error_red);
+                                //text to speech
+                                speakOutNow(message);
 
-                    String errMsg = "Try Again!\nOr\nCity Not Found!";
-                    weatherData.setText(errMsg);
-                    speakOutNow(errMsg);
+                                //clear text input
+                                cityName.setText("");
+
+                            } else {
+                                Toast.makeText(getApplicationContext(), "Could not find weather", Toast.LENGTH_LONG).show();
+                            }
+                        }//endfor
+                    } else {
+                        Log.i("tms name <>", cityNameFromSite + " vs " + inputName + " False");
+
+                        errorHandler();
+
+                    }
+                } catch (JSONException e) {
                     Toast.makeText(getApplicationContext(), "Could not find weather", Toast.LENGTH_LONG).show();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                } catch (ExecutionException e) {
+                    e.printStackTrace();
                 }
-            } catch (JSONException e) {
-                Toast.makeText(getApplicationContext(), "Could not find weather", Toast.LENGTH_LONG).show();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            } catch (ExecutionException e) {
-                e.printStackTrace();
+
+
+            } else {
+                errorHandler();
             }
-
-            //clear text input
-            cityName.setText("");
-
         }
     } //end download task
+
+    private String readStream(InputStream stream) throws Exception {
+        StringBuilder builder = new StringBuilder();
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(stream))) {
+            String line;
+            while ((line = in.readLine()) != null) {
+                builder.append(line); // + "\r\n"(no need, json has no line breaks!)
+            }
+            in.close();
+        }
+        Log.i("tms JSON:", builder.toString());
+        return builder.toString();
+    }
+
+    //error speech and message
+    public void errorHandler() {
+        playSoundEffect("wrong");
+
+        weatherIcon.setImageResource(R.drawable.error_red);
+
+        String errMsg = "Try Again!\nOr\nCity Not Found!";
+        weatherData.setTextColor(getResources().getColor(R.color.colorAccent));
+        weatherData.setText(errMsg);
+        speakOutNow(errMsg);
+        Toast.makeText(getApplicationContext(), "Could not find weather", Toast.LENGTH_LONG).show();
+
+        //clear text input
+        cityName.setText("");
+    }
 
     //download image icon from web
     public Bitmap getIcon(String url) throws ExecutionException, InterruptedException {
